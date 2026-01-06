@@ -5,6 +5,7 @@ class TabManager {
     this.sessions = [];
     this.currentTab = "home";
     this.selectedTabs = new Set(); // Track selected tabs for bulk operations
+    this.currentSearchQuery = ""; // Track current search query
     this.init();
   }
 
@@ -116,9 +117,22 @@ class TabManager {
   selectAllInSession(sessionId) {
     const session = this.sessions.find((s) => s.id === sessionId);
     if (session) {
-      session.tabs.forEach((tab) => {
-        this.selectedTabs.add(`${sessionId}-${tab.id}`);
-      });
+      // If there's a search query, only select visible (filtered) tabs
+      if (this.currentSearchQuery) {
+        const filteredTabs = session.tabs.filter(
+          (tab) =>
+            tab.title.toLowerCase().includes(this.currentSearchQuery) ||
+            tab.url.toLowerCase().includes(this.currentSearchQuery)
+        );
+        filteredTabs.forEach((tab) => {
+          this.selectedTabs.add(`${sessionId}-${tab.id}`);
+        });
+      } else {
+        // No search, select all tabs
+        session.tabs.forEach((tab) => {
+          this.selectedTabs.add(`${sessionId}-${tab.id}`);
+        });
+      }
       this.render();
     }
   }
@@ -126,9 +140,22 @@ class TabManager {
   deselectAllInSession(sessionId) {
     const session = this.sessions.find((s) => s.id === sessionId);
     if (session) {
-      session.tabs.forEach((tab) => {
-        this.selectedTabs.delete(`${sessionId}-${tab.id}`);
-      });
+      // If there's a search query, only deselect visible (filtered) tabs
+      if (this.currentSearchQuery) {
+        const filteredTabs = session.tabs.filter(
+          (tab) =>
+            tab.title.toLowerCase().includes(this.currentSearchQuery) ||
+            tab.url.toLowerCase().includes(this.currentSearchQuery)
+        );
+        filteredTabs.forEach((tab) => {
+          this.selectedTabs.delete(`${sessionId}-${tab.id}`);
+        });
+      } else {
+        // No search, deselect all tabs
+        session.tabs.forEach((tab) => {
+          this.selectedTabs.delete(`${sessionId}-${tab.id}`);
+        });
+      }
       this.render();
     }
   }
@@ -144,11 +171,8 @@ class TabManager {
         await this.openTab(tab.url);
       }
 
-      // Clear selection after opening
-      selectedInSession.forEach((tab) => {
-        this.selectedTabs.delete(`${sessionId}-${tab.id}`);
-      });
-      this.render();
+      // Keep selection after opening - don't clear
+      this.updateBulkActions();
     }
   }
 
@@ -359,9 +383,9 @@ class TabManager {
   }
 
   handleSearch(query) {
-    const searchTerm = query.toLowerCase();
+    this.currentSearchQuery = query.toLowerCase();
 
-    if (!searchTerm) {
+    if (!this.currentSearchQuery) {
       this.render();
       return;
     }
@@ -370,8 +394,8 @@ class TabManager {
       .map((session) => {
         const filteredTabs = session.tabs.filter(
           (tab) =>
-            tab.title.toLowerCase().includes(searchTerm) ||
-            tab.url.toLowerCase().includes(searchTerm)
+            tab.title.toLowerCase().includes(this.currentSearchQuery) ||
+            tab.url.toLowerCase().includes(this.currentSearchQuery)
         );
 
         if (filteredTabs.length > 0) {
@@ -385,7 +409,12 @@ class TabManager {
   }
 
   render() {
-    this.renderSessions(this.sessions);
+    // If there's an active search, re-apply it
+    if (this.currentSearchQuery) {
+      this.handleSearch(this.currentSearchQuery);
+    } else {
+      this.renderSessions(this.sessions);
+    }
   }
 
   renderSessions(sessions) {
