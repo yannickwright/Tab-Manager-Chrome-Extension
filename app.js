@@ -6,6 +6,7 @@ class TabManager {
     this.currentTab = "home";
     this.selectedTabs = new Set(); // Track selected tabs for bulk operations
     this.currentSearchQuery = ""; // Track current search query
+    this.draggedTab = null; // Track the saved tab currently being moved
     this.init();
   }
 
@@ -319,6 +320,60 @@ class TabManager {
     }
   }
 
+  async moveTabToSession(fromSessionId, tabId, toSessionId, beforeTabId = null) {
+    try {
+      if (fromSessionId === toSessionId && tabId === beforeTabId) {
+        return;
+      }
+
+      const fromSession = this.sessions.find((s) => s.id === fromSessionId);
+      const toSession = this.sessions.find((s) => s.id === toSessionId);
+      if (!fromSession || !toSession) {
+        return;
+      }
+
+      const fromIndex = fromSession.tabs.findIndex((tab) => tab.id === tabId);
+      if (fromIndex === -1) {
+        return;
+      }
+
+      const [tab] = fromSession.tabs.splice(fromIndex, 1);
+      const targetTabs =
+        fromSessionId === toSessionId ? fromSession.tabs : toSession.tabs;
+      let insertIndex = targetTabs.length;
+
+      if (beforeTabId !== null) {
+        const targetIndex = targetTabs.findIndex(
+          (targetTab) => targetTab.id === beforeTabId
+        );
+        if (targetIndex !== -1) {
+          insertIndex = targetIndex;
+        }
+      }
+
+      targetTabs.splice(insertIndex, 0, tab);
+
+      const oldSelectionKey = `${fromSessionId}-${tabId}`;
+      const newSelectionKey = `${toSessionId}-${tabId}`;
+      if (this.selectedTabs.has(oldSelectionKey)) {
+        this.selectedTabs.delete(oldSelectionKey);
+        this.selectedTabs.add(newSelectionKey);
+      }
+
+      if (fromSessionId !== toSessionId && fromSession.tabs.length === 0) {
+        this.sessions = this.sessions.filter(
+          (session) => session.id !== fromSessionId
+        );
+      }
+
+      await this.saveSessions();
+      this.render();
+    } finally {
+      this.draggedTab = null;
+      this.clearDragIndicators();
+    }
+  }
+
   async toggleSession(sessionId) {
     const session = this.sessions.find((s) => s.id === sessionId);
     if (session) {
@@ -545,6 +600,69 @@ class TabManager {
 
       // Tab actions
       session.tabs.forEach((tab) => {
+        const tabItem = document.querySelector(
+          `[data-session-tab="${session.id}-${tab.id}"]`
+        );
+        if (tabItem) {
+          tabItem.addEventListener("dragstart", (e) => {
+            if (e.target.closest("button, input")) {
+              e.preventDefault();
+              return;
+            }
+
+            this.draggedTab = {
+              sessionId: session.id,
+              tabId: tab.id,
+            };
+
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData(
+              "text/plain",
+              JSON.stringify(this.draggedTab)
+            );
+
+            tabItem.classList.add("dragging");
+          });
+
+          tabItem.addEventListener("dragend", () => {
+            this.draggedTab = null;
+            this.clearDragIndicators();
+          });
+
+          tabItem.addEventListener("dragover", (e) => {
+            if (!this.draggedTab) {
+              return;
+            }
+
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            this.showDropIndicator(tabItem, e.clientY);
+          });
+
+          tabItem.addEventListener("dragleave", (e) => {
+            if (!tabItem.contains(e.relatedTarget)) {
+              tabItem.classList.remove("drop-before", "drop-after");
+            }
+          });
+
+          tabItem.addEventListener("drop", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (!this.draggedTab) {
+              return;
+            }
+
+            const placeAfter = tabItem.classList.contains("drop-after");
+            this.moveTabToSession(
+              this.draggedTab.sessionId,
+              this.draggedTab.tabId,
+              session.id,
+              placeAfter ? this.getNextTabId(session.id, tab.id) : tab.id
+            );
+          });
+        }
+
         // Checkbox
         const checkbox = document.querySelector(
           `[data-checkbox="${session.id}-${tab.id}"]`
@@ -581,7 +699,81 @@ class TabManager {
           });
         }
       });
+
+      const sessionGroup = document.querySelector(`[data-session="${session.id}"]`);
+      const tabList = sessionGroup?.querySelector(".tab-list");
+      if (sessionGroup && tabList) {
+        [sessionGroup, tabList].forEach((dropTarget) => {
+          dropTarget.addEventListener("dragover", (e) => {
+            if (!this.draggedTab) {
+              return;
+            }
+
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            sessionGroup.classList.add("drop-target");
+          });
+
+          dropTarget.addEventListener("dragleave", (e) => {
+            if (!sessionGroup.contains(e.relatedTarget)) {
+              sessionGroup.classList.remove("drop-target");
+            }
+          });
+
+          dropTarget.addEventListener("drop", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (!this.draggedTab || e.target.closest(".tab-item")) {
+              return;
+            }
+
+            this.moveTabToSession(
+              this.draggedTab.sessionId,
+              this.draggedTab.tabId,
+              session.id
+            );
+          });
+        });
+      }
     });
+  }
+
+  clearDragIndicators() {
+    document
+      .querySelectorAll(".dragging, .drop-before, .drop-after, .drop-target")
+      .forEach((element) => {
+        element.classList.remove(
+          "dragging",
+          "drop-before",
+          "drop-after",
+          "drop-target"
+        );
+      });
+  }
+
+  showDropIndicator(tabItem, clientY) {
+    document
+      .querySelectorAll(".drop-before, .drop-after, .drop-target")
+      .forEach((element) => {
+        element.classList.remove("drop-before", "drop-after", "drop-target");
+      });
+
+    const rect = tabItem.getBoundingClientRect();
+    const isAfter = clientY > rect.top + rect.height / 2;
+    tabItem.classList.toggle("drop-before", !isAfter);
+    tabItem.classList.toggle("drop-after", isAfter);
+    tabItem.closest(".session-group")?.classList.add("drop-target");
+  }
+
+  getNextTabId(sessionId, tabId) {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) {
+      return null;
+    }
+
+    const currentIndex = session.tabs.findIndex((tab) => tab.id === tabId);
+    return session.tabs[currentIndex + 1]?.id ?? null;
   }
 
   renderSession(session) {
@@ -664,7 +856,7 @@ class TabManager {
     return `
       <div class="tab-item ${isSelected ? "selected" : ""}" data-tab-id="${
       tab.id
-    }" data-session-tab="${sessionId}-${tab.id}">
+    }" data-session-tab="${sessionId}-${tab.id}" draggable="true">
         <input 
           type="checkbox" 
           class="tab-checkbox" 
