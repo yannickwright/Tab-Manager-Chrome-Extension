@@ -1,114 +1,170 @@
 // Popup script for Tab Manager
 
+const RESTRICTED_URL_PREFIXES = [
+  "chrome://",
+  "chrome-extension://",
+  "edge://",
+  "about:",
+  "devtools://",
+];
+
+function generateId() {
+  if (globalThis.crypto?.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function sanitizeFavicon(favIconUrl) {
+  if (!favIconUrl) return null;
+  if (favIconUrl.startsWith("data:") || favIconUrl.startsWith("chrome://")) {
+    return null;
+  }
+  return favIconUrl;
+}
+
+// Tabs that are still loading or have been discarded by the browser often have
+// an empty `url` with the real address in `pendingUrl`.
+function resolveUrl(tab) {
+  return tab.pendingUrl || tab.url || "";
+}
+
+function isSaveableUrl(url) {
+  if (!url) return false;
+  if (url.startsWith(chrome.runtime.getURL(""))) return false;
+  return !RESTRICTED_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+}
+
+// Single source of truth for both the badge count and the save action, so the
+// number shown always matches what will actually be stored.
+async function getHighlightedTabs() {
+  const tabs = await chrome.tabs.query({ currentWindow: true, highlighted: true });
+  const saveable = [];
+  const skipped = [];
+
+  for (const tab of tabs) {
+    const url = resolveUrl(tab);
+    if (isSaveableUrl(url)) {
+      saveable.push({ ...tab, url });
+    } else if (!url.startsWith(chrome.runtime.getURL(""))) {
+      skipped.push(tab);
+    }
+  }
+
+  return { saveable, skipped };
+}
+
+function describeSkipped(count) {
+  if (count === 0) return "";
+  return ` ${count} browser page${count > 1 ? "s" : ""} can't be saved and will be left open.`;
+}
+
 async function updateHighlightedCount() {
   try {
-    const tabs = await chrome.tabs.query({ currentWindow: true, highlighted: true });
-    // Filter out the popup itself and only count non-active highlighted tabs
-    const highlightedTabs = tabs.filter(tab => !tab.url.includes(chrome.runtime.getURL('')));
-    const count = highlightedTabs.length;
-    
-    const countElement = document.getElementById('highlightCount');
-    const saveBtn = document.getElementById('saveHighlighted');
-    const infoMessage = document.getElementById('infoMessage');
-    
+    const { saveable, skipped } = await getHighlightedTabs();
+    const count = saveable.length;
+
+    const countElement = document.getElementById("highlightCount");
+    const saveBtn = document.getElementById("saveHighlighted");
+    const infoMessage = document.getElementById("infoMessage");
+
     countElement.textContent = count;
-    
+    saveBtn.disabled = count === 0;
+
     if (count === 0) {
-      saveBtn.style.opacity = '0.5';
-      saveBtn.style.cursor = 'not-allowed';
-      infoMessage.innerHTML = '💡 Highlight tabs (Ctrl/Cmd + Click) then click "Save Highlighted Tabs"';
+      infoMessage.textContent =
+        'Highlight tabs (Ctrl/Cmd + Click) then click "Save Highlighted Tabs".' +
+        describeSkipped(skipped.length);
+      infoMessage.classList.remove("ready");
     } else {
-      saveBtn.style.opacity = '1';
-      saveBtn.style.cursor = 'pointer';
-      infoMessage.innerHTML = `✨ ${count} tab${count > 1 ? 's' : ''} highlighted and ready to save`;
-      infoMessage.style.borderLeftColor = '#10b981';
+      infoMessage.textContent =
+        `${count} tab${count > 1 ? "s" : ""} ready to save.` +
+        describeSkipped(skipped.length);
+      infoMessage.classList.add("ready");
     }
   } catch (error) {
-    console.error('Error counting highlighted tabs:', error);
+    console.error("Error counting highlighted tabs:", error);
   }
 }
 
 // Open the Tab Manager app
-document.getElementById('openApp').addEventListener('click', async () => {
-  await chrome.tabs.create({
-    url: chrome.runtime.getURL('index.html')
-  });
+document.getElementById("openApp").addEventListener("click", async () => {
+  await chrome.tabs.create({ url: chrome.runtime.getURL("index.html") });
   window.close();
 });
 
 // Save highlighted tabs
-document.getElementById('saveHighlighted').addEventListener('click', async () => {
+document.getElementById("saveHighlighted").addEventListener("click", async () => {
+  const saveBtn = document.getElementById("saveHighlighted");
+  if (saveBtn.disabled) return;
+
   try {
-    const tabs = await chrome.tabs.query({ currentWindow: true, highlighted: true });
-    
-    // Filter out the popup and extension pages
-    const highlightedTabs = tabs.filter(tab => 
-      !tab.url.includes(chrome.runtime.getURL('')) &&
-      !tab.url.startsWith('chrome://')
-    );
-    
-    if (highlightedTabs.length === 0) {
-      alert('No tabs highlighted! Highlight tabs by holding Ctrl/Cmd and clicking them.');
+    const { saveable, skipped } = await getHighlightedTabs();
+
+    if (saveable.length === 0) {
+      updateHighlightedCount();
       return;
     }
 
-    // Create a new session with highlighted tabs
+    saveBtn.disabled = true;
+
+    const now = Date.now();
     const session = {
-      id: Date.now(),
-      name: 'add name',
-      timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
-      tabs: highlightedTabs.map(tab => ({
-        id: tab.id,
-        title: tab.title,
+      id: now,
+      name: "",
+      savedAt: now,
+      tabs: saveable.map((tab) => ({
+        uid: generateId(),
+        title: tab.title || "",
         url: tab.url,
-        favIconUrl: tab.favIconUrl
+        favIconUrl: sanitizeFavicon(tab.favIconUrl),
       })),
-      collapsed: false
+      collapsed: false,
     };
 
-    // Load existing sessions
-    const result = await chrome.storage.local.get(['sessions']);
+    // Storage is written before any tabs are closed so a failure here leaves
+    // the user's tabs untouched.
+    const result = await chrome.storage.local.get(["sessions"]);
     const sessions = result.sessions || [];
-    
-    // Add new session to the beginning
     sessions.unshift(session);
-    
-    // Save updated sessions
     await chrome.storage.local.set({ sessions });
 
-    // Close the highlighted tabs
-    const tabIds = highlightedTabs.map(tab => tab.id);
-    await chrome.tabs.remove(tabIds);
+    await chrome.tabs.remove(saveable.map((tab) => tab.id));
 
-    // Show success message
-    const saveBtn = document.getElementById('saveHighlighted');
-    const originalHTML = saveBtn.innerHTML;
+    saveBtn.classList.add("success");
     saveBtn.innerHTML = `
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
         <path d="M3 8l3 3 7-7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <div class="btn-text">
-        <div>Saved! ✓</div>
-        <div class="btn-desc">${highlightedTabs.length} tab${highlightedTabs.length > 1 ? 's' : ''} saved and closed</div>
+        <div>Saved</div>
+        <div class="btn-desc">${saveable.length} tab${saveable.length > 1 ? "s" : ""} saved and closed${
+          skipped.length ? `, ${skipped.length} skipped` : ""
+        }</div>
       </div>
     `;
-    saveBtn.style.background = '#10b981';
-    saveBtn.style.borderColor = '#10b981';
 
-    // Close popup after a short delay
-    setTimeout(() => {
-      window.close();
-    }, 1000);
-
+    setTimeout(() => window.close(), 1000);
   } catch (error) {
-    console.error('Error saving highlighted tabs:', error);
-    alert('Error saving tabs. Please try again.');
+    console.error("Error saving highlighted tabs:", error);
+    saveBtn.disabled = false;
+    const infoMessage = document.getElementById("infoMessage");
+    infoMessage.textContent =
+      "Couldn't save tabs. Storage may be full or unavailable. Your tabs were not closed.";
+    infoMessage.classList.remove("ready");
+    infoMessage.classList.add("error");
   }
 });
 
-// Update count when popup opens
+// Keep the count in sync via tab events instead of polling.
+chrome.tabs.onHighlighted.addListener(updateHighlightedCount);
+chrome.tabs.onActivated.addListener(updateHighlightedCount);
+chrome.tabs.onCreated.addListener(updateHighlightedCount);
+chrome.tabs.onRemoved.addListener(updateHighlightedCount);
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url || changeInfo.status === "complete") {
+    updateHighlightedCount();
+  }
+});
+
 updateHighlightedCount();
-
-// Update count every 500ms to reflect changes
-setInterval(updateHighlightedCount, 500);
-

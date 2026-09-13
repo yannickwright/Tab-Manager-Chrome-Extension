@@ -8,36 +8,36 @@
 </head>
 <body>
   <div class="app">
-    <!-- Header with Navigation -->
-    <header class="header">
-      <div class="header-title">
-        <h1>Tab Manager</h1>
-      </div>
-    </header>
+    <div class="top-bar">
+      <header class="header">
+        <div class="header-title">
+          <h1>Tab Manager</h1>
+        </div>
+      </header>
 
-    <!-- Controls Bar -->
-    <div class="controls-bar">
-      <div class="controls-left">
-        <button class="btn-expand">Expand/Collapse</button>
-      </div>
-      <div class="controls-right">
-        <div class="search-box">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <circle cx="7" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M10 10l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-          <input type="text" placeholder="Search" id="searchInput">
+      <div class="controls-bar">
+        <div class="controls-left">
+          <button class="btn-expand">Expand/Collapse</button>
+        </div>
+        <div class="controls-right">
+          <div class="search-box">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="7" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M10 10l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <input type="text" placeholder="Search" id="searchInput" aria-label="Search saved tabs">
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Main Content -->
-    <main class="main-content" id="mainContent">
+    <main class="main-content" id="mainContent" role="list">
       <!-- Sessions will be dynamically added here -->
     </main>
   </div>
 
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
   <script src="app.js"></script>
 </body>
 </html>
-

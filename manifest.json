@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Tab Manager",
-  "version": "1.3.7",
+  "version": "1.4.0",
   "description": "Organize and manage your browser tabs efficiently",
   "permissions": [
     "tabs",
-    "storage"
+    "storage",
+    "unlimitedStorage"
   ],
   "action": {
     "default_popup": "popup.html",

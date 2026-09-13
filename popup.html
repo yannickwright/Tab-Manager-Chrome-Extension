@@ -53,6 +53,32 @@
       transform: translateY(0);
     }
 
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn.success,
+    .btn.success:hover {
+      background: #10b981;
+      border-color: #10b981;
+      color: white;
+      opacity: 1;
+    }
+
+    .btn.success .btn-desc {
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .info.ready {
+      border-left-color: #10b981;
+    }
+
+    .info.error {
+      border-left-color: #ef4444;
+    }
+
     .btn svg {
       width: 18px;
       height: 18px;
@@ -124,7 +150,7 @@
   <div class="divider"></div>
 
   <div class="info" id="infoMessage">
-    💡 Highlight tabs (Ctrl/Cmd + Click) then click "Save Highlighted Tabs"
+    Highlight tabs (Ctrl/Cmd + Click) then click "Save Highlighted Tabs".
   </div>
 
   <script src="popup.js"></script>
